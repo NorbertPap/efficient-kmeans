@@ -3,10 +3,18 @@ import numpy as np
 import math
 import time
 import random
+import os
+import sys
+
+# Add the parent directory to the Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from MiniProject.R1_to_12_dataset import generate_dataset
+
+
 
 DIMENSION_SELECT = 0 # 0 for round robin, 1 for max variance
 SPLIT_VALUE_SELECT = 0 # 0 for midpoint, 1 for median
-LEAF_SIZE = 64
+LEAF_SIZE = 16 # Number of points in a leaf node
 D = 6 # Dimensionality
 
 class KDNode():
@@ -29,7 +37,7 @@ class KDNode():
 
 
     def build_tree(self):
-        if (len(self.points) < LEAF_SIZE):
+        if (len(self.points) <= LEAF_SIZE):
             return
         
         # Round-robin
@@ -66,7 +74,18 @@ class KDNode():
         self.left.build_tree()
         self.right.build_tree()
 
-        self.point = None
+        self.points = None
+
+    def get_points(self):
+        if self.points is not None:
+            return self.points
+        left = self.left.get_points()
+        if(left is None or len(left) == 0):
+            left = np.empty((0, D))
+        right = self.right.get_points()
+        if(right is None or len(right) == 0):
+            right = np.empty((0, D))
+        return np.concatenate((left, right), axis=0)
 
 
 def build_kd_tree(points, ranges):
@@ -98,7 +117,7 @@ def min_max_dist(centroid, node):
 
 def traverse_tree(node, centroids, cluster_stats, points_per_centroid):
     if node.points is not None: # Leaf node
-        distances = [[math.sqrt(sum((p[i] - c[i]) ** 2 for i in range(len(p)))) for c in centroids] for p in node.points]
+        distances = [[euclidean_distance(p, c) for c in centroids] for p in node.points]
         labels = [dist.index(min(dist)) for dist in distances]
         for i in range(len(centroids)):
             mask = [j for j, label in enumerate(labels) if label == i]
@@ -117,7 +136,7 @@ def traverse_tree(node, centroids, cluster_stats, points_per_centroid):
         cluster_stats[i]['n'] += node.n_points
         cluster_stats[i]['sum'] = [cluster_stats[i]['sum'][d] + node.lin_sum[d] for d in range(len(centroids[0]))]
         cluster_stats[i]['sum_sq'] = [cluster_stats[i]['sum_sq'][d] + node.squared_sum[d] for d in range(len(centroids[0]))]
-        points_per_centroid[i].extend(node.points)
+        points_per_centroid[i].extend(node.get_points())
     else:
         traverse_tree(node.left, centroids, cluster_stats, points_per_centroid)
         traverse_tree(node.right, centroids, cluster_stats, points_per_centroid)
@@ -127,8 +146,10 @@ def efficient_kmeans(X, k, max_iters=100, tol=1e-4):
     start_time = time.time()
     n, d = X.shape
     
+    tree_start_time = time.time()
     # Build k-d tree
     root = build_kd_tree(X, np.array([[0.0, 1.0]] * d))
+    print("Time to build tree:", time.time() - tree_start_time)
     
     # Initialize centroids randomly
     centroids = X[np.random.choice(n, k, replace=False)]
@@ -137,8 +158,10 @@ def efficient_kmeans(X, k, max_iters=100, tol=1e-4):
         cluster_stats = [{'n': 0, 'sum': [0.0] * d, 'sum_sq': [0.0] * d} for _ in range(k)]
         points_per_centroid = [[] for _ in range(k)]
         
+        tree_start_time = time.time()
         # Traverse tree and update cluster statistics
         traverse_tree(root, centroids, cluster_stats, points_per_centroid)
+        print(f"Time to traverse tree, iteration #{_}", time.time() - tree_start_time)
         
         # Update centroids
         new_centroids = []
@@ -194,6 +217,7 @@ def direct_kmeans(X, k, max_iters=100, tol=1e-4):
     centroids = X[np.random.choice(n, k, replace=False)]
     
     for _ in range(max_iters):
+        print(f"Iteration #{_}")
         # Assign points to nearest centroid
         labels = []
         for point in X:
@@ -222,23 +246,26 @@ def direct_kmeans(X, k, max_iters=100, tol=1e-4):
 if __name__ == '__main__':
     k = 10
     # generate 1000 random points in 2D
-    X = np.random.rand(100000, D)
+    # X = np.random.rand(10000, D)
+    X, labels = generate_dataset(d=D, k=k, n=10000, cube_size=1.0, cluster_radius=0.05, seed=42)
+
+
     centroids, labels, error = efficient_kmeans(X, k)
     print("Error:", error)
-    plt.scatter(X[:, 0], X[:, 1], c=labels, alpha=0.7)
-    plt.scatter(np.array(centroids)[:, 0], np.array(centroids)[:, 1], c='red', marker='x', s=200, linewidths=3)
-    plt.title("Efficient K-Means Clustering")
-    plt.xlabel('X')
-    plt.ylabel('Y')
-    plt.colorbar(ticks=range(k), label='Cluster')
-    plt.show()
+    # plt.scatter(X[:, 0], X[:, 1], c=labels, alpha=0.7)
+    # plt.scatter(np.array(centroids)[:, 0], np.array(centroids)[:, 1], c='red', marker='x', s=200, linewidths=3)
+    # plt.title("Efficient K-Means Clustering")
+    # plt.xlabel('X')
+    # plt.ylabel('Y')
+    # plt.colorbar(ticks=range(k), label='Cluster')
+    # plt.show()
 
     centroids, labels, error = direct_kmeans(X, k)
-    print("Error:", error)
-    plt.scatter(X[:, 0], X[:, 1], c=labels, alpha=0.7)
-    plt.scatter(np.array(centroids)[:, 0], np.array(centroids)[:, 1], c='red', marker='x', s=200, linewidths=3)
-    plt.title("Direct K-Means Clustering")
-    plt.xlabel('X')
-    plt.ylabel('Y')
-    plt.colorbar(ticks=range(k), label='Cluster')
-    plt.show()
+    # print("Error:", error)
+    # plt.scatter(X[:, 0], X[:, 1], c=labels, alpha=0.7)
+    # plt.scatter(np.array(centroids)[:, 0], np.array(centroids)[:, 1], c='red', marker='x', s=200, linewidths=3)
+    # plt.title("Direct K-Means Clustering")
+    # plt.xlabel('X')
+    # plt.ylabel('Y')
+    # plt.colorbar(ticks=range(k), label='Cluster')
+    # plt.show()
